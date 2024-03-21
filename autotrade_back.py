@@ -11,11 +11,6 @@ import time
 import asyncio
 import telegram
 
-# 전역 변수로 거래 정보를 저장
-trade_info = {}
-
-
-
 # Setup
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 upbit = pyupbit.Upbit(os.getenv("UPBIT_ACCESS_KEY"), os.getenv("UPBIT_SECRET_KEY"))
@@ -126,27 +121,19 @@ def execute_buy():
         if krw > 5000:
             result = upbit.buy_market_order("KRW-BTT", krw*0.9995)
             print("Buy order successful:", result)
-            return result
     except Exception as e:
         print(f"Failed to execute buy order: {e}")
-        return None
 
 def execute_sell():
     print("Attempting to sell BTT...")
     try:
         btt = upbit.get_balance("BTT")
-        if btt > 1:  # 변경: 판매 가능한 BTT 양이 최소 1 이상이어야 합니다.
+        current_price = pyupbit.get_orderbook(ticker="KRW-BTT")['orderbook_units'][0]["ask_price"]
+        if current_price*btt > 5000:
             result = upbit.sell_market_order("KRW-BTT", btt-1)
             print("Sell order successful:", result)
-            return result
     except Exception as e:
         print(f"Failed to execute sell order: {e}")
-        return None
-
-async def send_telegram_message(message):
-    token = os.getenv('TELEGRAM_API_KEY')
-    bot = telegram.Bot(token)
-    await bot.send_message(chat_id=os.getenv('TELEGRAM_CHAT_ID'), text=message)
 
 def make_decision_and_execute():
     print("Making decision and executing...")
@@ -156,24 +143,30 @@ def make_decision_and_execute():
     try:
         decision = json.loads(advice)
         print(decision)
-
+        # 딕셔너리를 보기 좋은 문자열로 변환
         pretty_advice = json.dumps(decision, indent=2, ensure_ascii=False)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(send_telegram_message(pretty_advice))
         
-        # 거래 실행
-        result = None
-        if decision.get('decision') == "buy":
-            result = execute_buy()
-        elif decision.get('decision') == "sell":
-            result = execute_sell()
+        async def main():
+            token = os.getenv('TELEGRAM_API_KEY')
+            bot = telegram.Bot(token)
+            await bot.send_message(chat_id=os.getenv('TELEGRAM_CHAT_ID'), text=pretty_advice)
 
-        if result:
-            # 거래 세부 정보를 포함한 메시지 생성
-            trade_message = f"거래 결과는 다음과 같습니다. : {result}"
-            loop.run_until_complete(send_telegram_message(trade_message))
+        # 현재 실행 중인 이벤트 루프를 얻습니다.
+        loop = asyncio.get_event_loop()
+
+        # 이벤트 루프가 실행 중이지 않은 경우 main() 코루틴을 실행합니다.
+        if not loop.is_running():
+            loop.run_until_complete(main())
+        else:
+            # 이미 실행 중인 이벤트 루프에 main() 코루틴을 스케줄링합니다.
+            asyncio.create_task(main())
+        
+        if decision.get('decision') == "buy":
+            execute_buy()
+        elif decision.get('decision') == "sell":
+            execute_sell()
     except Exception as e:
-        print(f"Failed to process the decision: {e}")
+        print(f"Failed to parse the advice as JSON: {e}")
 
 if __name__ == "__main__":
     make_decision_and_execute()
@@ -182,5 +175,3 @@ if __name__ == "__main__":
     while True:
         schedule.run_pending()
         time.sleep(1)
-
-
