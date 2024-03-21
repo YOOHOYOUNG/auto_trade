@@ -188,11 +188,19 @@ async def make_decision_and_execute():
 
 async def main():
     await make_decision_and_execute()
-    schedule.every().hour.at(":01").do(lambda: asyncio.run(make_decision_and_execute()))
+    # 이벤트 루프를 가져오고, 주기적으로 실행할 작업을 스케줄링합니다.
+    loop = asyncio.get_running_loop()
+    
+    def schedule_job():
+        loop.call_soon_threadsafe(schedule.run_pending)
+    
+    # 매시간 1분마다 make_decision_and_execute() 코루틴을 실행합니다.
+    schedule.every().hour.at(":01").do(lambda: asyncio.create_task(make_decision_and_execute()))
 
+    # 스케줄러가 주기적으로 실행될 수 있도록 무한 루프를 설정합니다.
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        await asyncio.sleep(1)  # 현재 실행 중인 이벤트 루프를 블록하지 않습니다.
+        schedule_job()
 
 if __name__ == "__main__":
     asyncio.run(main())
