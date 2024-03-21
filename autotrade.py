@@ -184,7 +184,7 @@ async def make_decision_and_execute():
             
     elif decision.get('decision') == "hold":
         await send_telegram_message("거래 결과 : 홀딩합니다.")
-        print("홀딩 :", result)
+        print("홀딩", decision)
 
 async def main():
     await make_decision_and_execute()
