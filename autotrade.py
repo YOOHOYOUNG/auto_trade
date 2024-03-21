@@ -14,27 +14,27 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 upbit = pyupbit.Upbit(os.getenv("UPBIT_ACCESS_KEY"), os.getenv("UPBIT_SECRET_KEY"))
 
 def get_current_status():
-    orderbook = pyupbit.get_orderbook(ticker="KRW-BTC")
+    orderbook = pyupbit.get_orderbook(ticker="KRW-BTT")
     current_time = orderbook['timestamp']
-    btc_balance = 0
+    btt_balance = 0
     krw_balance = 0
-    btc_avg_buy_price = 0
+    btt_avg_buy_price = 0
     balances = upbit.get_balances()
     for b in balances:
-        if b['currency'] == "BTC":
-            btc_balance = b['balance']
-            btc_avg_buy_price = b['avg_buy_price']
+        if b['currency'] == "BTT":
+            btt_balance = b['balance']
+            btt_avg_buy_price = b['avg_buy_price']
         if b['currency'] == "KRW":
             krw_balance = b['balance']
 
-    current_status = {'current_time': current_time, 'orderbook': orderbook, 'btc_balance': btc_balance, 'krw_balance': krw_balance, 'btc_avg_buy_price': btc_avg_buy_price}
+    current_status = {'current_time': current_time, 'orderbook': orderbook, 'btt_balance': btt_balance, 'krw_balance': krw_balance, 'btt_avg_buy_price': btt_avg_buy_price}
     return json.dumps(current_status)
 
 
 def fetch_and_prepare_data():
     # Fetch data
-    df_daily = pyupbit.get_ohlcv("KRW-BTC", "day", count=30)
-    df_hourly = pyupbit.get_ohlcv("KRW-BTC", interval="minute60", count=24)
+    df_daily = pyupbit.get_ohlcv("KRW-BTT", "day", count=30)
+    df_hourly = pyupbit.get_ohlcv("KRW-BTT", interval="minute60", count=24)
 
     # Define a helper function to add indicators
     def add_indicators(df):
@@ -113,22 +113,22 @@ def analyze_data_with_gpt4(data_json):
         return None
 
 def execute_buy():
-    print("Attempting to buy BTC...")
+    print("Attempting to buy BTT...")
     try:
         krw = upbit.get_balance("KRW")
         if krw > 5000:
-            result = upbit.buy_market_order("KRW-BTC", krw*0.9995)
+            result = upbit.buy_market_order("KRW-BTT", krw*0.9995)
             print("Buy order successful:", result)
     except Exception as e:
         print(f"Failed to execute buy order: {e}")
 
 def execute_sell():
-    print("Attempting to sell BTC...")
+    print("Attempting to sell BTT...")
     try:
-        btc = upbit.get_balance("BTC")
-        current_price = pyupbit.get_orderbook(ticker="KRW-BTC")['orderbook_units'][0]["ask_price"]
-        if current_price*btc > 5000:
-            result = upbit.sell_market_order("KRW-BTC", btc)
+        btt = upbit.get_balance("BTT")
+        current_price = pyupbit.get_orderbook(ticker="KRW-BTT")['orderbook_units'][0]["ask_price"]
+        if current_price*btt > 5000:
+            result = upbit.sell_market_order("KRW-BTT", btt)
             print("Sell order successful:", result)
     except Exception as e:
         print(f"Failed to execute sell order: {e}")
