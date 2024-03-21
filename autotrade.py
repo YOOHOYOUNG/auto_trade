@@ -172,10 +172,10 @@ async def make_decision_and_execute():
             trade_result = process_trade_result(result, df_hourly, INIT_VOLUME)
 
             result_message = f"※ 거래 결과\n거래 화폐명: {trade_result['currency_name']}\n거래 시간: {trade_result['trade_time']}\n거래한 수량: {trade_result['trade_volume']}\n거래 금액: {trade_result['trade_price']}\n홀딩 했을 때 원금: {trade_result['hold_price']}"
-
             await send_telegram_message(result_message)
-            # 거래 성공 결과를 콘솔에 로그로 남깁니다.
             print("거래 성공:", result)
+            print(result_message)
+            # 거래 성공 결과를 콘솔에 로그로 남깁니다.
             
         else:
             await send_telegram_message("Trading operation failed.")
