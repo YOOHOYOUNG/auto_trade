@@ -8,6 +8,8 @@ import json
 from openai import OpenAI
 import schedule
 import time
+import asyncio
+import telegram
 
 # Setup
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -141,6 +143,24 @@ def make_decision_and_execute():
     try:
         decision = json.loads(advice)
         print(decision)
+        # 딕셔너리를 보기 좋은 문자열로 변환
+        pretty_advice = json.dumps(decision, indent=2, ensure_ascii=False)
+        
+        async def main():
+            token = os.getenv('TELEGRAM_API_KEY')
+            bot = telegram.Bot(token)
+            await bot.send_message(chat_id=os.getenv('TELEGRAM_CHAT_ID'), text=pretty_advice)
+
+        # 현재 실행 중인 이벤트 루프를 얻습니다.
+        loop = asyncio.get_event_loop()
+
+        # 이벤트 루프가 실행 중이지 않은 경우 main() 코루틴을 실행합니다.
+        if not loop.is_running():
+            loop.run_until_complete(main())
+        else:
+            # 이미 실행 중인 이벤트 루프에 main() 코루틴을 스케줄링합니다.
+            asyncio.create_task(main())
+        
         if decision.get('decision') == "buy":
             execute_buy()
         elif decision.get('decision') == "sell":
