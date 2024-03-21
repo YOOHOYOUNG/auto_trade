@@ -130,7 +130,7 @@ def execute_sell():
         btt = upbit.get_balance("BTT")
         current_price = pyupbit.get_orderbook(ticker="KRW-BTT")['orderbook_units'][0]["ask_price"]
         if current_price*btt > 5000:
-            result = upbit.sell_market_order("KRW-BTT", btt)
+            result = upbit.sell_market_order("KRW-BTT", btt-1)
             print("Sell order successful:", result)
     except Exception as e:
         print(f"Failed to execute sell order: {e}")
