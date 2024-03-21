@@ -13,6 +13,7 @@ import telegram
 
 # 전역 변수로 거래 정보를 저장
 trade_info = {}
+INIT_VOLUME =  2298402227.5 # 초기 보유량
 
 
 
@@ -20,71 +21,46 @@ trade_info = {}
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 upbit = pyupbit.Upbit(os.getenv("UPBIT_ACCESS_KEY"), os.getenv("UPBIT_SECRET_KEY"))
 
+# def get_current_status():
+#     orderbook = pyupbit.get_orderbook(ticker="KRW-BTT")
+#     current_time = orderbook['timestamp']
+#     btt_balance = 0
+#     krw_balance = 0
+#     btt_avg_buy_price = 0
+#     balances = upbit.get_balances()
+#     for b in balances:
+#         if b['currency'] == "BTT":
+#             btt_balance = b['balance']
+#             btt_avg_buy_price = b['avg_buy_price']
+#         if b['currency'] == "KRW":
+#             krw_balance = b['balance']
+
+#     current_status = {'current_time': current_time, 'orderbook': orderbook, 'btt_balance': btt_balance, 'krw_balance': krw_balance, 'btt_avg_buy_price': btt_avg_buy_price}
+#     return json.dumps(current_status)
+
+# 현재 상태 가져오기 함수
 def get_current_status():
     orderbook = pyupbit.get_orderbook(ticker="KRW-BTT")
-    current_time = orderbook['timestamp']
-    btt_balance = 0
-    krw_balance = 0
-    btt_avg_buy_price = 0
     balances = upbit.get_balances()
-    for b in balances:
-        if b['currency'] == "BTT":
-            btt_balance = b['balance']
-            btt_avg_buy_price = b['avg_buy_price']
-        if b['currency'] == "KRW":
-            krw_balance = b['balance']
+    btt_balance = next((item for item in balances if item['currency'] == 'BTT'), {}).get('balance', 0)
+    krw_balance = next((item for item in balances if item['currency'] == 'KRW'), {}).get('balance', 0)
+    btt_avg_buy_price = next((item for item in balances if item['currency'] == 'BTT'), {}).get('avg_buy_price', 0)
 
-    current_status = {'current_time': current_time, 'orderbook': orderbook, 'btt_balance': btt_balance, 'krw_balance': krw_balance, 'btt_avg_buy_price': btt_avg_buy_price}
-    return json.dumps(current_status)
-
+    return {
+        'current_time': orderbook['timestamp'],
+        'btt_balance': btt_balance,
+        'krw_balance': krw_balance,
+        'btt_avg_buy_price': btt_avg_buy_price
+    }
 
 def fetch_and_prepare_data():
     # Fetch data
     df_daily = pyupbit.get_ohlcv("KRW-BTT", "day", count=30)
     df_hourly = pyupbit.get_ohlcv("KRW-BTT", interval="minute60", count=24)
 
-    # Define a helper function to add indicators
-    def add_indicators(df):
-        # Moving Averages
-        df['SMA_10'] = ta.sma(df['close'], length=10)
-        df['EMA_10'] = ta.ema(df['close'], length=10)
+    # 여기에서 DataFrame을 JSON 문자열로 변환하는 코드는 제거
+    return df_daily, df_hourly
 
-        # RSI
-        df['RSI_14'] = ta.rsi(df['close'], length=14)
-
-        # Stochastic Oscillator
-        stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
-        df = df.join(stoch)
-
-        # MACD
-        ema_fast = df['close'].ewm(span=12, adjust=False).mean()
-        ema_slow = df['close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = ema_fast - ema_slow
-        df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['MACD_Histogram'] = df['MACD'] - df['Signal_Line']
-
-        # Bollinger Bands
-        df['Middle_Band'] = df['close'].rolling(window=20).mean()
-        # Calculate the standard deviation of closing prices over the last 20 days
-        std_dev = df['close'].rolling(window=20).std()
-        # Calculate the upper band (Middle Band + 2 * Standard Deviation)
-        df['Upper_Band'] = df['Middle_Band'] + (std_dev * 2)
-        # Calculate the lower band (Middle Band - 2 * Standard Deviation)
-        df['Lower_Band'] = df['Middle_Band'] - (std_dev * 2)
-
-        return df
-
-    # Add indicators to both dataframes
-    df_daily = add_indicators(df_daily)
-    df_hourly = add_indicators(df_hourly)
-
-    combined_df = pd.concat([df_daily, df_hourly], keys=['daily', 'hourly'])
-    combined_data = combined_df.to_json(orient='split')
-
-    # make combined data as string and print length
-    print(len(combined_data))
-
-    return json.dumps(combined_data)
 
 def get_instructions(file_path):
     try:
@@ -96,12 +72,11 @@ def get_instructions(file_path):
     except Exception as e:
         print("An error occurred while reading the file:", e)
 
-def analyze_data_with_gpt4(data_json):
+def analyze_data_with_gpt4(data):
     instructions_path = "instructions.md"
     try:
         instructions = get_instructions(instructions_path)
         if not instructions:
-            print("No instructions found.")
             return None
 
         current_status = get_current_status()
@@ -109,8 +84,8 @@ def analyze_data_with_gpt4(data_json):
             model="gpt-4-turbo-preview",
             messages=[
                 {"role": "system", "content": instructions},
-                {"role": "user", "content": data_json},
-                {"role": "user", "content": current_status}
+                {"role": "user", "content": json.dumps(data)}, # Python 객체를 JSON 문자열로 변환
+                {"role": "user", "content": json.dumps(current_status)} # 여기도 마찬가지
             ],
             response_format={"type":"json_object"}
         )
@@ -135,54 +110,89 @@ def execute_sell():
     print("Attempting to sell BTT...")
     try:
         btt = upbit.get_balance("BTT")
-        if btt > 1:  # 변경: 판매 가능한 BTT 양이 최소 1 이상이어야 합니다.
+        if btt > 1000000:  # 변경: 판매 가능한 BTT 양이 최소 1 이상이어야 합니다.
             result = upbit.sell_market_order("KRW-BTT", btt-1)
+            if 'error' in result:
+                print(f"Sell order failed: {result['error']['message']}")
+                return None  # 에러가 있는 경우 None을 반환
             print("Sell order successful:", result)
             return result
     except Exception as e:
         print(f"Failed to execute sell order: {e}")
         return None
 
+# 텔레그램 메시지 전송 함수
 async def send_telegram_message(message):
     token = os.getenv('TELEGRAM_API_KEY')
     bot = telegram.Bot(token)
     await bot.send_message(chat_id=os.getenv('TELEGRAM_CHAT_ID'), text=message)
 
-def make_decision_and_execute():
-    print("Making decision and executing...")
-    data_json = fetch_and_prepare_data()
+# 거래 결과 처리 함수
+
+def process_trade_result(result, df_hourly, INIT_VOLUME):
+    """
+    거래 결과 처리 함수. 거래 금액과 거래한 수량 추가.
+    """
+    currency_name = result['market']  # 거래 대상 암호화폐
+    trade_time = result['created_at']  # 거래 시간
+    trade_volume = float(result.get('volume', 0))  # 거래한 수량
+    trade_price = trade_volume * df_hourly['open'].iloc[-1]  # 거래 금액
+    hold_price = INIT_VOLUME * df_hourly['open'].iloc[-1]  # 홀딩했을 때의 원금
+
+    return {
+        "currency_name": currency_name,
+        "trade_time": trade_time,
+        "trade_volume": trade_volume,  # 추가
+        "trade_price": trade_price,  # 추가
+        "hold_price": hold_price
+    }
+    
+async def make_decision_and_execute():
+    df_daily, df_hourly = fetch_and_prepare_data()
+    if df_daily is None or df_hourly is None:
+        print("Data fetching failed. Exiting...")
+        return
+    
+    data_json = {
+        "daily": json.loads(df_daily.to_json(orient='split')),
+        "hourly": json.loads(df_hourly.to_json(orient='split'))
+    }
+
     advice = analyze_data_with_gpt4(data_json)
+    if not advice:
+        print("Data analysis failed. Exiting...")
+        return
 
-    try:
-        decision = json.loads(advice)
-        print(decision)
+    decision = json.loads(advice)
+    await send_telegram_message(json.dumps(decision, indent=2, ensure_ascii=False))
 
-        pretty_advice = json.dumps(decision, indent=2, ensure_ascii=False)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(send_telegram_message(pretty_advice))
-        
-        # 거래 실행
-        result = None
-        if decision.get('decision') == "buy":
-            result = execute_buy()
-        elif decision.get('decision') == "sell":
-            result = execute_sell()
-        elif decision.get('decision') == "hold":
-            result = "보유중인 BTT를 유지합니다."
+    if decision.get('decision') in ["buy", "sell"]:
+        result = execute_buy() if decision['decision'] == "buy" else execute_sell()
+        if result and 'error' not in result:
+            trade_result = process_trade_result(result, df_hourly, INIT_VOLUME)
 
-        if result:
-            # 거래 세부 정보를 포함한 메시지 생성
-            trade_message = f"거래 결과는 다음과 같습니다. : {result}"
-            loop.run_until_complete(send_telegram_message(trade_message))
-    except Exception as e:
-        print(f"Failed to process the decision: {e}")
+            result_message = f"※ 거래 결과\n거래 화폐명: {trade_result['currency_name']}\n거래 시간: {trade_result['trade_time']}\n거래한 수량: {trade_result['trade_volume']}\n거래 금액: {trade_result['trade_price']}\n홀딩 했을 때 원금: {trade_result['hold_price']}"
 
-if __name__ == "__main__":
-    make_decision_and_execute()
-    schedule.every().hour.at(":01").do(make_decision_and_execute)
+            await send_telegram_message(result_message)
+            # 거래 성공 결과를 콘솔에 로그로 남깁니다.
+            print("거래 성공:", result)
+            
+        else:
+            await send_telegram_message("Trading operation failed.")
+            # 거래 실패 결과를 콘솔에 로그로 남깁니다.
+            print("거래 실패:", result)
+            
+    elif decision.get('decision') == "hold":
+        await send_telegram_message("거래 결과 : 홀딩합니다.")
+        print("홀딩 :", result)
+
+async def main():
+    await make_decision_and_execute()
+    schedule.every().hour.at(":01").do(lambda: asyncio.run(make_decision_and_execute()))
 
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-
+if __name__ == "__main__":
+    asyncio.run(main())
