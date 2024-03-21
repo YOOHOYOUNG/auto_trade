@@ -167,6 +167,8 @@ def make_decision_and_execute():
             result = execute_buy()
         elif decision.get('decision') == "sell":
             result = execute_sell()
+        elif decision.get('decision') == "hold":
+            result = "보유중인 BTT를 유지합니다."
 
         if result:
             # 거래 세부 정보를 포함한 메시지 생성
