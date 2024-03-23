@@ -177,10 +177,10 @@ async def make_decision_and_execute():
 
     elif decision.get('decision') == "hold":
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        hold_message = f"{current_time} \n- ※ 분석 결과: 홀딩합니다."
+        hold_message = f"{current_time} - 거래 결과: 홀딩합니다."
         await send_telegram_message(hold_message)
-        print("홀딩", decision)
-
+        print(f"{current_time} - 홀딩", decision)
+        
 async def main():
     await make_decision_and_execute()
     # 이벤트 루프를 가져오고, 주기적으로 실행할 작업을 스케줄링합니다.
