@@ -241,7 +241,8 @@ async def make_decision_and_execute():
             current_status = get_current_status()  # 현재 상태 정보를 가져옴
             trade_result = process_trade_result(result, df_hourly, current_status)  # 수정된 함수 호출
 
-            result_message = f"{current_time} ※ 거래 결과\n" \
+            result_message = f"{current_time}\n" \
+                             "※거래 결과\n" \
                              f"거래 화폐명: {trade_result['currency_name']}\n" \
                              f"거래 시간: {trade_result['trade_time']}\n" \
                              f"거래한 수량: {trade_result['trade_volume']:.2f}\n" \
