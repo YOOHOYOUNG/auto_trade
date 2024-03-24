@@ -110,7 +110,30 @@ async def send_telegram_message(message):
 
 # 거래 결과 처리 함수
 
-def process_trade_result(result, df_hourly, INIT_VOLUME):
+# def process_trade_result(result, df_hourly, INIT_VOLUME):
+#     currency_name = result['market']  # 거래 대상 암호화폐
+#     trade_time = result['created_at']  # 거래 시간
+#     current_price = df_hourly['open'].iloc[-1]  # 현재 가격
+
+#     if result['side'] == 'bid':  # 매수일 경우
+#         locked_amount = float(result['locked'])  # 매수 금액
+#         trade_volume = locked_amount / current_price  # 매수 수량 계산
+#         trade_price = locked_amount  # 이미 매수 금액이므로 그대로 사용
+#     else:  # 매도일 경우
+#         trade_volume = float(result['volume'])  # 매도 수량
+#         trade_price = trade_volume * current_price  # 매도 금액 계산
+
+#     hold_price = INIT_VOLUME * current_price  # 홀딩했을 때의 원금
+
+#     return {
+#         "currency_name": currency_name,
+#         "trade_time": trade_time,
+#         "trade_volume": trade_volume,
+#         "trade_price": trade_price,
+#         "hold_price": hold_price,
+#     }
+
+def process_trade_result(result, df_hourly, current_status):
     currency_name = result['market']  # 거래 대상 암호화폐
     trade_time = result['created_at']  # 거래 시간
     current_price = df_hourly['open'].iloc[-1]  # 현재 가격
@@ -123,7 +146,13 @@ def process_trade_result(result, df_hourly, INIT_VOLUME):
         trade_volume = float(result['volume'])  # 매도 수량
         trade_price = trade_volume * current_price  # 매도 금액 계산
 
-    hold_price = INIT_VOLUME * current_price  # 홀딩했을 때의 원금
+    # 현재 BTT 보유량과 KRW 잔액을 current_status에서 추출
+    btt_balance = float(current_status['btt_balance']) + (trade_volume if result['side'] == 'bid' else -trade_volume)
+    krw_balance = float(current_status['krw_balance']) + (-trade_price if result['side'] == 'bid' else trade_price)
+
+    current_total_value = btt_balance * current_price + krw_balance  # 현재 보유 총액 계산
+    hold_price = INIT_VOLUME * current_price  # 홀딩했을 때의 원금 계산
+    profit_or_loss = current_total_value - hold_price  # 홀딩 대비 손익액 계산
 
     return {
         "currency_name": currency_name,
@@ -131,8 +160,57 @@ def process_trade_result(result, df_hourly, INIT_VOLUME):
         "trade_volume": trade_volume,
         "trade_price": trade_price,
         "hold_price": hold_price,
+        "current_total_value": current_total_value,
+        "profit_or_loss": profit_or_loss
     }
-    
+# async def make_decision_and_execute():
+#     df_daily, df_hourly = fetch_and_prepare_data()
+#     if df_daily is None or df_hourly is None:
+#         print("데이터 가져오기 실패. 종료합니다.")
+#         return
+
+#     data_json = {
+#         "daily": json.loads(df_daily.to_json(orient='split')),
+#         "hourly": json.loads(df_hourly.to_json(orient='split'))
+#     }
+
+#     advice = analyze_data_with_gpt4(data_json)
+#     if not advice:
+#         print("데이터 분석 실패. 종료합니다.")
+#         return
+
+#     decision = json.loads(advice)
+#     await send_telegram_message(json.dumps(decision, indent=2, ensure_ascii=False))
+
+#     if decision.get('decision') == "buy" or decision.get('decision') == "sell":
+#         percentage = decision.get('percentage', 1.0)  # 기본값을 100%로 설정
+#         if decision['decision'] == "buy":
+#             result = execute_buy(percentage)  # 매수 함수에 비율을 인자로 전달
+#         else:
+#             result = execute_sell(percentage)  # 매도 함수에 비율을 인자로 전달
+        
+#         if result and 'error' not in result:
+#             trade_result = process_trade_result(result, df_hourly, INIT_VOLUME)
+
+#             result_message = f"※ 거래 결과\n" \
+#                              f"거래 화폐명: {trade_result['currency_name']}\n" \
+#                              f"거래 시간: {trade_result['trade_time']}\n" \
+#                              f"거래한 수량: {trade_result['trade_volume']:.2f}\n" \
+#                              f"거래 금액: {trade_result['trade_price']:.2f}\n" \
+#                              f"홀딩 했을 때 원금: {trade_result['hold_price']:.2f}\n"
+#             await send_telegram_message(result_message)
+#             print("거래 성공:", result)
+#             print(result_message)
+#         else:
+#             await send_telegram_message("거래 작업 실패.")
+#             print("거래 실패:", result)
+
+#     elif decision.get('decision') == "hold":
+#         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#         hold_message = f"{current_time} \n ※ 분석 결과: 홀딩합니다."
+#         await send_telegram_message(hold_message)
+#         print(f"{current_time} - 홀딩", decision)
+
 async def make_decision_and_execute():
     df_daily, df_hourly = fetch_and_prepare_data()
     if df_daily is None or df_hourly is None:
@@ -152,35 +230,37 @@ async def make_decision_and_execute():
     decision = json.loads(advice)
     await send_telegram_message(json.dumps(decision, indent=2, ensure_ascii=False))
 
-    if decision.get('decision') == "buy" or decision.get('decision') == "sell":
-        percentage = decision.get('percentage', 1.0)  # 기본값을 100%로 설정
-        if decision['decision'] == "buy":
-            result = execute_buy(percentage)  # 매수 함수에 비율을 인자로 전달
-        else:
-            result = execute_sell(percentage)  # 매도 함수에 비율을 인자로 전달
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # current_time을 여기로 이동
+
+    if decision.get('decision') in ["buy", "sell"]:
+        percentage = decision.get('percentage', 1.0)  # 결정된 비율을 사용
+        # buy 혹은 sell 함수 호출
+        result = execute_buy(percentage) if decision['decision'] == "buy" else execute_sell(percentage)
         
         if result and 'error' not in result:
-            trade_result = process_trade_result(result, df_hourly, INIT_VOLUME)
+            current_status = get_current_status()  # 현재 상태 정보를 가져옴
+            trade_result = process_trade_result(result, df_hourly, current_status)  # 수정된 함수 호출
 
-            result_message = f"※ 거래 결과\n" \
+            result_message = f"{current_time} ※ 거래 결과\n" \
                              f"거래 화폐명: {trade_result['currency_name']}\n" \
                              f"거래 시간: {trade_result['trade_time']}\n" \
                              f"거래한 수량: {trade_result['trade_volume']:.2f}\n" \
                              f"거래 금액: {trade_result['trade_price']:.2f}\n" \
-                             f"홀딩 했을 때 원금: {trade_result['hold_price']:.2f}\n"
-            await send_telegram_message(result_message)
-            print("거래 성공:", result)
+                             f"홀딩 했을 때 원금: {trade_result['hold_price']:.2f}\n" \
+                             f"현재 보유 총액: {trade_result['current_total_value']:.2f}\n" \
+                             f"홀딩 대비 손익액: {trade_result['profit_or_loss']:.2f}"
             print(result_message)
+            await send_telegram_message(result_message)
         else:
-            await send_telegram_message("거래 작업 실패.")
-            print("거래 실패:", result)
+            fail_message = f"{current_time} 거래 실패: {result.get('error', '알 수 없는 오류')}"
+            print(fail_message)
+            await send_telegram_message(fail_message)
 
     elif decision.get('decision') == "hold":
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        hold_message = f"{current_time} \n ※ 분석 결과: 홀딩합니다."
+        hold_message = f"{current_time} \n※ 분석 결과: 홀딩합니다."
+        print(hold_message)
         await send_telegram_message(hold_message)
-        print(f"{current_time} - 홀딩", decision)
-        
+
 async def main():
     await make_decision_and_execute()
     # 이벤트 루프를 가져오고, 주기적으로 실행할 작업을 스케줄링합니다.
