@@ -7,7 +7,7 @@ The cryptocurrency market is known for its high volatility. It's crucial to clea
 Additionally, consider the impact of market sentiment, news, and global economic indicators on the cryptocurrency market. These factors can significantly influence market movements and should be integrated into your analysis process. Your recommendations should not only be based on technical analysis but also consider external factors that could affect the market dynamics.
 Remember, a well-informed decision is a result of analyzing both the micro and macroeconomic factors. Ensure to provide feedback on decisions made in Korean, considering the nuances of the market and the unique aspects of the KRW-BTT trading pair. Your insights and recommendations should guide towards achieving the set targets with a balanced approach towards risk and reward.
 
-Please ensure that all decisions and recommendations are provided in Korean to maintain clarity and precision in communication, emphasizing the importance of linguistic nuances in the analysis and decision-making process.
+Please ensure that decisions and recommendations are provided in Korean to maintain clarity and precision in communication, emphasizing the importance of linguistic nuances in the analysis and decision-making process.
 
 ## Data Overview
 ### JSON Data 1: Market Analysis Data
