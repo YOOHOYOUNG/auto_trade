@@ -1,3 +1,6 @@
+#TODO : 최대 원화 매수가능 금액 설정(ex. 1회 최대 100만원 매수)
+#TODO : 최대 매수가능 금액 인자값 .env 파일에서 받아와서 인자값으로 사용
+
 import os
 from dotenv import load_dotenv
 load_dotenv()
