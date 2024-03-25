@@ -16,30 +16,34 @@ from datetime import datetime
 trade_info = {}
 INIT_VOLUME =  2298402227.5 # 초기 보유량
 
+
 # Setup
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 upbit = pyupbit.Upbit(os.getenv("UPBIT_ACCESS_KEY"), os.getenv("UPBIT_SECRET_KEY"))
+ticker = os.getenv("TRADING_PAIR")
+currency = ticker.split("-")[1]
+
 
 # 현재 상태 가져오기 함수
 def get_current_status():
-    orderbook = pyupbit.get_orderbook(ticker="KRW-BTT")
+    orderbook = pyupbit.get_orderbook(ticker=ticker)
     balances = upbit.get_balances()
-    btt_balance = next((item for item in balances if item['currency'] == 'BTT'), {}).get('balance', 0)
+    currency_balance = next((item for item in balances if item['currency'] == currency), {}).get('balance', 0)
     krw_balance = next((item for item in balances if item['currency'] == 'KRW'), {}).get('balance', 0)
-    btt_avg_buy_price = next((item for item in balances if item['currency'] == 'BTT'), {}).get('avg_buy_price', 0)
+    currency_avg_buy_price = next((item for item in balances if item['currency'] == currency), {}).get('avg_buy_price', 0)
 
     return {
         'current_time': orderbook['timestamp'],
-        'btt_balance': btt_balance,
+        'currency_balance': currency_balance,
         'krw_balance': krw_balance,
-        'btt_avg_buy_price': btt_avg_buy_price
+        'currency_avg_buy_price': currency_avg_buy_price
     }
 
 # 데이터 가져오기 및 준비 함수
 def fetch_and_prepare_data():
     # Fetch data
-    df_daily = pyupbit.get_ohlcv("KRW-BTT", "day", count=30)
-    df_hourly = pyupbit.get_ohlcv("KRW-BTT", interval="minute60", count=24)
+    df_daily = pyupbit.get_ohlcv(ticker, "day", count=30)
+    df_hourly = pyupbit.get_ohlcv(ticker, interval="minute60", count=24)
 
     # 여기에서 DataFrame을 JSON 문자열로 변환하는 코드는 제거
     return df_daily, df_hourly
@@ -49,11 +53,20 @@ def get_instructions(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             instructions = file.read()
+
+        # 특정 키워드를 동적으로 대체합니다.
+        instructions = instructions.replace("BTT", currency.upper())
+        instructions = instructions.replace("btt", currency.lower())
+        # "Bittorrent"의 경우, 모든 거래 페어의 통화가 명확한 대문자/소문자 규칙을 따르지 않기 때문에,
+        # 직접 변환 규칙을 적용할 필요가 있습니다.
+        # 예시로, "Ethereum"처럼 변환한다고 가정하면:
+        instructions = instructions.replace("Bittorrent", currency.capitalize())  # 예: "Ethereum"
+
         return instructions
     except FileNotFoundError:
         print("File not found.")
     except Exception as e:
-        print("An error occurred while reading the file:", e)
+        print(f"An error occurred while reading the file: {e}")
 
 # GPT-4를 사용하여 데이터 분석        
 def analyze_data_with_gpt4(data):
@@ -85,7 +98,7 @@ def execute_buy(buy_percentage=1.0):
         krw_balance = upbit.get_balance("KRW")  # KRW 잔고 조회
         buy_amount = krw_balance * buy_percentage  # 매수 금액 계산
         if buy_amount > 5000:  # 최소 거래 금액 조건 확인
-            result = upbit.buy_market_order("KRW-BTT", buy_amount * 0.9995)  # 수수료 고려하여 매수 실행
+            result = upbit.buy_market_order(ticker, buy_amount * 0.9995)  # 수수료 고려하여 매수 실행
             print(f"{current_time} - Buy order successful:", result)
             return result
     except Exception as e:
@@ -96,10 +109,10 @@ def execute_buy(buy_percentage=1.0):
 def execute_sell(sell_percentage=1.0):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        btt_balance = upbit.get_balance("BTT")  # BTT 보유 수량 조회
-        sell_quantity = btt_balance * sell_percentage  # 매도 수량 계산
+        currency_balance = upbit.get_balance(currency)  # currency 보유 수량 조회
+        sell_quantity = currency_balance * sell_percentage  # 매도 수량 계산
         if sell_quantity > 0.0001:  # 최소 거래 수량 조건 확인
-            result = upbit.sell_market_order("KRW-BTT", sell_quantity)  # 매도 실행
+            result = upbit.sell_market_order(ticker, sell_quantity)  # 매도 실행
             print(f"{current_time} - Sell order successful:", result)
             return result
     except Exception as e:
@@ -126,11 +139,11 @@ def process_trade_result(result, df_hourly, current_status):
         trade_volume = float(result['volume'])  # 매도 수량
         trade_price = trade_volume * current_price  # 매도 금액 계산
 
-    # 현재 BTT 보유량과 KRW 잔액을 current_status에서 추출
-    btt_balance = float(current_status['btt_balance']) + (trade_volume if result['side'] == 'bid' else -trade_volume)
+    # 현재 currency 보유량과 KRW 잔액을 current_status에서 추출
+    currency_balance = float(current_status['currency_balance']) + (trade_volume if result['side'] == 'bid' else -trade_volume)
     krw_balance = float(current_status['krw_balance']) + (-trade_price if result['side'] == 'bid' else trade_price)
 
-    current_total_value = btt_balance * current_price + krw_balance  # 현재 보유 총액 계산
+    current_total_value = currency_balance * current_price + krw_balance  # 현재 보유 총액 계산
     hold_price = INIT_VOLUME * current_price  # 홀딩했을 때의 원금 계산
     profit_or_loss = current_total_value - hold_price  # 홀딩 대비 손익액 계산
 
@@ -192,26 +205,26 @@ async def make_decision_and_execute():
             await send_telegram_message(fail_message)
 
     elif decision.get('decision') == "hold":
-        btt_balance = 0
+        currency_balance = 0
         krw_balance = 0
-        btt_avg_buy_price = 0
+        currency_avg_buy_price = 0
 
         df_daily, df_hourly = fetch_and_prepare_data()
         current_price = df_hourly['open'].iloc[-1]  # 현재 가격
         hold_value = current_price * INIT_VOLUME
 
 
-        btt_balance = float(get_current_status()['btt_balance'])
+        currency_balance = float(get_current_status()['currency_balance'])
         krw_balance = float(get_current_status()['krw_balance'])
-        btt_avg_buy_price = float(get_current_status()['btt_avg_buy_price'])
-        current_value = (btt_balance * btt_avg_buy_price) + krw_balance
+        currency_avg_buy_price = float(get_current_status()['currency_avg_buy_price'])
+        current_value = (currency_balance * currency_avg_buy_price) + krw_balance
 
         profit_value = current_value - hold_value        
         hold_message =  f"{current_time}\n" \
                 "※ 분석 결과: 홀딩합니다.\n" \
                 f"홀딩 했을 때 원금: {hold_value:.2f}\n" \
                 f"현재 보유 총액: {current_value:.2f}\n" \
-                f"현재 대비 손익액: {profit_value:.2f}\n"
+                f"홀딩 대비 손익액: {profit_value:.2f}\n"
         print(hold_message)
         await send_telegram_message(hold_message)
 
