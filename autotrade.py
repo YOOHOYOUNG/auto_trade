@@ -209,9 +209,9 @@ async def make_decision_and_execute():
         profit_value = current_value - hold_value        
         hold_message =  f"{current_time}\n" \
                 "※ 분석 결과: 홀딩합니다.\n" \
-                f"홀딩 했을 때 원금: {hold_value}\n" \
-                f"현재 보유 총액: {current_value}\n" \
-                f"현재 대비 손익액: {profit_value}\n"
+                f"홀딩 했을 때 원금: {hold_value:.2f}\n" \
+                f"현재 보유 총액: {current_value:.2f}\n" \
+                f"현재 대비 손익액: {profit_value:.2f}\n"
         print(hold_message)
         await send_telegram_message(hold_message)
 
