@@ -1,2 +1,9 @@
 .env
 *.ipynb
+build/
+dist/
+*.spec
+.gitignore
+배포/
+*.exe
+env_origin

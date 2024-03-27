@@ -1,23 +1,44 @@
-#TODO : 최대 원화 매수가능 금액 설정(ex. 1회 최대 100만원 매수)
-#TODO : 최대 매수가능 금액 인자값 .env 파일에서 받아와서 인자값으로 사용
-
 import os
 from dotenv import load_dotenv
 load_dotenv()
+from datetime import datetime, timedelta
 import pyupbit
 import pandas as pd
 import pandas_ta as ta
 import json
 from openai import OpenAI
 import schedule
-import time
+# import time
 import asyncio
 import telegram
 from datetime import datetime
 
 # 전역 변수로 거래 정보를 저장
-trade_info = {}
-INIT_VOLUME =  2298402227.5 # 초기 보유량
+INIT_VOLUME = float(os.getenv("INIT_VOLUME"))  # .env에서 무조건 받아오기, 설정되지 않으면 에러 발생
+MAX_KRW_BUY_AMOUNT_ENV = os.getenv("MAX_KRW_BUY_AMOUNT")  # "max" 또는 숫자 값
+
+# 로그 파일 경로 설정
+LOG_FILE_PATH = "autotrade_log.txt"
+
+# MAX_KRW_BUY_AMOUNT 값이 "max"인지 확인하거나 숫자로 변환
+if MAX_KRW_BUY_AMOUNT_ENV is None:
+    raise ValueError("MAX_KRW_BUY_AMOUNT must be set in the .env file.")
+
+if MAX_KRW_BUY_AMOUNT_ENV.lower() == "max":
+    MAX_KRW_BUY_AMOUNT = "max"
+else:
+    try:
+        MAX_KRW_BUY_AMOUNT = float(MAX_KRW_BUY_AMOUNT_ENV)
+    except ValueError:
+        raise ValueError("MAX_KRW_BUY_AMOUNT must be a number or 'max'.")
+
+
+def log_to_file(message, print_to_console=False):
+    """로그 메시지를 파일에 기록하고, 선택적으로 콘솔에도 출력합니다."""
+    with open(LOG_FILE_PATH, "a", encoding='utf-8') as log_file:
+        log_file.write(f"{message}\n\n")  # 메시지를 파일에 기록
+    if print_to_console:
+        print(message)  # 선택적으로 콘솔에도 메시지를 출력합니다.
 
 
 # Setup
@@ -25,6 +46,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 upbit = pyupbit.Upbit(os.getenv("UPBIT_ACCESS_KEY"), os.getenv("UPBIT_SECRET_KEY"))
 ticker = os.getenv("TRADING_PAIR")
 currency = ticker.split("-")[1]
+
 
 
 # 현재 상태 가져오기 함수
@@ -60,16 +82,12 @@ def get_instructions(file_path):
         # 특정 키워드를 동적으로 대체합니다.
         instructions = instructions.replace("BTT", currency.upper())
         instructions = instructions.replace("btt", currency.lower())
-        # "Bittorrent"의 경우, 모든 거래 페어의 통화가 명확한 대문자/소문자 규칙을 따르지 않기 때문에,
-        # 직접 변환 규칙을 적용할 필요가 있습니다.
-        # 예시로, "Ethereum"처럼 변환한다고 가정하면:
-        instructions = instructions.replace("Bittorrent", currency.capitalize())  # 예: "Ethereum"
 
         return instructions
     except FileNotFoundError:
-        print("File not found.")
+        log_to_file("File not found.", print_to_console=True)
     except Exception as e:
-        print(f"An error occurred while reading the file: {e}")
+        log_to_file(f"An error occurred while reading the file: {e}", print_to_console=True)
 
 # GPT-4를 사용하여 데이터 분석        
 def analyze_data_with_gpt4(data):
@@ -91,36 +109,49 @@ def analyze_data_with_gpt4(data):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Error in analyzing data with GPT-4: {e}")
+        log_to_file(f"Error in analyzing data with GPT-4: {e}")
         return None
-
-# 매수 함수
+    
 def execute_buy(buy_percentage=1.0):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        krw_balance = upbit.get_balance("KRW")  # KRW 잔고 조회
-        buy_amount = krw_balance * buy_percentage  # 매수 금액 계산
-        if buy_amount > 5000:  # 최소 거래 금액 조건 확인
-            result = upbit.buy_market_order(ticker, buy_amount * 0.9995)  # 수수료 고려하여 매수 실행
-            print(f"{current_time} - Buy order successful:", result)
-            return result
+        krw_balance = upbit.get_balance("KRW")
+        buy_amount = krw_balance if MAX_KRW_BUY_AMOUNT == "max" else min(krw_balance * buy_percentage, MAX_KRW_BUY_AMOUNT)
+        if buy_amount > 5000:
+            result = upbit.buy_market_order(ticker, buy_amount * 0.9995)
+            if 'error' not in result:
+                log_message = f"{current_time} - Buy order successful: {json.dumps(result)}"
+                log_to_file(log_message,print_to_console=True)
+                return result
+            else:
+                raise Exception(result['error'])
+        else:
+            raise Exception("Insufficient KRW balance or amount less than minimum trade size")
     except Exception as e:
-        print(f"{current_time} - Failed to execute buy order: {e}")
+        log_message = f"{current_time} - Failed to execute buy order: {e}"
+        log_to_file(log_message,print_to_console=True)
         return None
 
-# 매도 함수
 def execute_sell(sell_percentage=1.0):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        currency_balance = upbit.get_balance(currency)  # currency 보유 수량 조회
-        sell_quantity = currency_balance * sell_percentage  # 매도 수량 계산
-        if sell_quantity > 0.0001:  # 최소 거래 수량 조건 확인
-            result = upbit.sell_market_order(ticker, sell_quantity)  # 매도 실행
-            print(f"{current_time} - Sell order successful:", result)
-            return result
+        currency_balance = upbit.get_balance(currency)
+        sell_quantity = currency_balance * sell_percentage
+        if sell_quantity > 0.0001:
+            result = upbit.sell_market_order(ticker, sell_quantity)
+            if 'error' not in result:
+                log_message = f"{current_time} - Sell order successful: {json.dumps(result)}"
+                log_to_file(log_message,print_to_console=True)
+                return result
+            else:
+                raise Exception(result['error'])
+        else:
+            raise Exception("Insufficient currency balance or amount less than minimum trade size")
     except Exception as e:
-        print(f"{current_time} - Failed to execute sell order: {e}")
+        log_message = f"{current_time} - Failed to execute sell order: {e}"
+        log_to_file(log_message,print_to_console=True)
         return None
+
 
 # 텔레그램 메시지 전송 함수
 async def send_telegram_message(message):
@@ -162,9 +193,10 @@ def process_trade_result(result, df_hourly, current_status):
 
 # 결정 및 실행 함수
 async def make_decision_and_execute():
+    log_to_file( "make_decision_and_execute 함수 시작\n",print_to_console=True)   
     df_daily, df_hourly = fetch_and_prepare_data()
     if df_daily is None or df_hourly is None:
-        print("데이터 가져오기 실패. 종료합니다.")
+        log_to_file( "데이터 가져오기 실패. 종료합니다.",print_to_console=True)
         return
 
     data_json = {
@@ -174,22 +206,22 @@ async def make_decision_and_execute():
 
     advice = analyze_data_with_gpt4(data_json)
     if not advice:
-        print("데이터 분석 실패. 종료합니다.")
+        log_to_file( "데이터 분석 실패. 종료합니다.",print_to_console=True)
         return
 
     decision = json.loads(advice)
+    log_to_file(f"분석 결과: {decision}",print_to_console=True)
     await send_telegram_message(json.dumps(decision, indent=2, ensure_ascii=False))
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # current_time을 여기로 이동
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if decision.get('decision') in ["buy", "sell"]:
-        percentage = decision.get('percentage', 1.0)  # 결정된 비율을 사용
-        # buy 혹은 sell 함수 호출
+        percentage = decision.get('percentage', 1.0)
         result = execute_buy(percentage) if decision['decision'] == "buy" else execute_sell(percentage)
         
         if result and 'error' not in result:
-            current_status = get_current_status()  # 현재 상태 정보를 가져옴
-            trade_result = process_trade_result(result, df_hourly, current_status)  # 수정된 함수 호출
+            current_status = get_current_status()
+            trade_result = process_trade_result(result, df_hourly, current_status)
 
             result_message = f"{current_time}\n" \
                              "※ 거래 결과\n" \
@@ -200,11 +232,11 @@ async def make_decision_and_execute():
                              f"홀딩 했을 때 원금: {trade_result['hold_price']:.2f}\n" \
                              f"현재 보유 총액: {trade_result['current_total_value']:.2f}\n" \
                              f"홀딩 대비 손익액: {trade_result['profit_or_loss']:.2f}"
-            print(result_message)
+            log_to_file(result_message,print_to_console=True)
             await send_telegram_message(result_message)
         else:
-            fail_message = f"{current_time} 거래 실패: {result.get('error', '알 수 없는 오류')}"
-            print(fail_message)
+            fail_message = f"{current_time} 거래 실패: 거래 명령 실행에 실패했습니다."
+            log_to_file(fail_message,print_to_console=True)
             await send_telegram_message(fail_message)
 
     elif decision.get('decision') == "hold":
@@ -216,27 +248,46 @@ async def make_decision_and_execute():
         current_price = df_hourly['open'].iloc[-1]  # 현재 가격
         hold_value = current_price * INIT_VOLUME
 
-
         currency_balance = float(get_current_status()['currency_balance'])
         krw_balance = float(get_current_status()['krw_balance'])
         currency_avg_buy_price = float(get_current_status()['currency_avg_buy_price'])
         current_value = (currency_balance * currency_avg_buy_price) + krw_balance
 
-        profit_value = current_value - hold_value        
-        hold_message =  f"{current_time}\n" \
+        profit_value = current_value - hold_value
+        hold_message = f"{current_time}\n" \
                 "※ 분석 결과: 홀딩합니다.\n" \
                 f"홀딩 했을 때 원금: {hold_value:.2f}\n" \
                 f"현재 보유 총액: {current_value:.2f}\n" \
                 f"홀딩 대비 손익액: {profit_value:.2f}\n"
-        print(hold_message)
+        log_to_file(hold_message,print_to_console=True)  # 로그 파일에 홀딩 관련 메시지 기록
         await send_telegram_message(hold_message)
+        log_to_file( "make_decision_and_execute 함수 종료\n",print_to_console=True)
+
+def run_autotrade_sync():
+    """
+    동기 방식으로 비동기 main 함수를 실행하는 래퍼 함수.
+    이 함수는 config_ui.py에서 호출할 수 있습니다.
+    """
+    asyncio.run(main())
 
 # 메인 함수
 async def main():
+    log_to_file( "#" * 50, print_to_console=True)
+    time1 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_to_file( f"{time1}\nAutotrade.py 실행됨",print_to_console=True)
+    log_to_file("비동기 main 함수 시작",print_to_console=True)
     await make_decision_and_execute()
     # 이벤트 루프를 가져오고, 주기적으로 실행할 작업을 스케줄링합니다.
     loop = asyncio.get_running_loop()
+    # 현재 시간을 datetime 객체로 받음
+    time2 = datetime.now()
 
+    # 현재 시간에 1시간을 더함
+    next_run_time = time2 + timedelta(hours=1)
+
+    # 두 시간 모두를 문자열로 변환하여 출력
+    log_to_file(f"{time2.strftime('%Y-%m-%d %H:%M:%S')} Autotrade.py 실행완료\n{next_run_time.strftime('%Y-%m-%d %H:%M:%S')}에 재실행 예정",print_to_console=True)
+    log_to_file( "#" * 50,print_to_console=True)
     def schedule_job():
         loop.call_soon_threadsafe(schedule.run_pending)
 
@@ -250,4 +301,4 @@ async def main():
         schedule_job()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_autotrade_sync()
