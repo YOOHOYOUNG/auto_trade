@@ -7,3 +7,4 @@ dist/
 배포/
 *.exe
 env_origin
+autotrade_log.txt
