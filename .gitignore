@@ -8,3 +8,4 @@ dist/
 *.exe
 env_origin
 autotrade_log.txt
+__pycache__/
