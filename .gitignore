@@ -9,3 +9,4 @@ dist/
 env_origin
 autotrade_log.txt
 __pycache__/
+restart_autotrade.sh
